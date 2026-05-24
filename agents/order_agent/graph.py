@@ -510,6 +510,78 @@ def build_order_graph(deps: OrderGraphDeps):
     return graph.compile()
 
 
+# Map each executed workflow node to its A2A delegation summary and the state
+# key holding the natural-language result of that step.
+_STEP_DELEGATIONS: dict[str, tuple[str, str]] = {
+    "check_inventory": (
+        "Asked the Inventory Agent to check and reserve stock",
+        "inventory_result",
+    ),
+    "process_payment": (
+        "Asked the Payment Agent to charge the customer",
+        "payment_result",
+    ),
+    "arrange_shipping": (
+        "Asked the Shipping Agent to create a shipment",
+        "shipping_result",
+    ),
+    "rollback_inventory": (
+        "Asked the Inventory Agent to release the reservation (payment failed)",
+        "inventory_result",
+    ),
+    "send_notification": (
+        "Asked the Notification Agent to notify the customer",
+        "notification_result",
+    ),
+}
+
+
+def _step_summary(text: Optional[str], limit: int = 220) -> str:
+    cleaned = " ".join((text or "").split())
+    return cleaned[: limit - 1] + "…" if len(cleaned) > limit else cleaned
+
+
+def build_audit_steps(state: OrderState) -> list[dict[str, str]]:
+    """Build a human-readable three-layer audit trail from the final state.
+
+    Each entry is ``{"layer", "summary"}`` where ``layer`` is one of
+    ``agent`` / ``a2a`` / ``mcp`` / ``rest`` so the UI can colour it by layer.
+    This is the same correlation-id-linked chain that the JSON audit logs and
+    the LangSmith/OTel traces record, surfaced for the customer-facing panel.
+    """
+    steps: list[dict[str, str]] = []
+
+    if state.get("product_name"):
+        steps.append(
+            {
+                "layer": "agent",
+                "summary": (
+                    f"Understood the request: {state.get('quantity')} × "
+                    f"{state.get('product_name')} for "
+                    f"{state.get('customer_name', 'the customer')} "
+                    f"(total {state.get('total_amount')} {state.get('currency')})."
+                ),
+            }
+        )
+
+    for node in state.get("executed_steps", []):
+        if node in _STEP_DELEGATIONS:
+            verb, key = _STEP_DELEGATIONS[node]
+            steps.append({"layer": "a2a", "summary": f"{verb} (A2A task)."})
+            result = _step_summary(state.get(key))
+            if result:
+                steps.append({"layer": "rest", "summary": result})
+        elif node == "save_order":
+            steps.append(
+                {"layer": "mcp", "summary": "Persisted the order via the order MCP tool."}
+            )
+            result = _step_summary(state.get("save_result"))
+            if result:
+                steps.append({"layer": "rest", "summary": result})
+
+    return steps
+
+
 def initial_state(customer_message: str) -> OrderState:
     """Seed the workflow state with a fresh correlation id."""
     return {

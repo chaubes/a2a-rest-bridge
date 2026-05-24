@@ -21,6 +21,7 @@ from shared.audit import emit_audit
 from shared.correlation import extract_correlation_id
 from shared.llm import make_llm
 from shared.mcp_client import load_mcp_tools
+from shared.tracing import trace_config
 import time
 
 logger = logging.getLogger("agentcart.peer")
@@ -78,7 +79,8 @@ class PeerAgentExecutor(AgentExecutor):
         try:
             agent = await self._ensure_agent()
             result = await agent.ainvoke(
-                {"messages": [HumanMessage(content=user_input)]}
+                {"messages": [HumanMessage(content=user_input)]},
+                config=trace_config(correlation_id, run_name=self._agent_name),
             )
             reply = _last_ai_text(result) or "No result produced."
             await updater.add_artifact(

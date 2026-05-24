@@ -39,3 +39,22 @@ def configure_langsmith() -> bool:
     project = os.getenv("LANGSMITH_PROJECT", "agentcart")
     logger.info("LangSmith tracing enabled for project %r.", project)
     return True
+
+
+def trace_config(correlation_id: str, run_name: str) -> dict:
+    """Build a LangGraph/LangChain ``RunnableConfig`` that groups traces.
+
+    Tagging every run with the ``correlation_id`` (as both a metadata field and
+    a LangSmith thread key) means a single order's runs across all five agents
+    can be filtered by ``metadata.correlation_id`` and collapsed into one
+    thread in the LangSmith UI. ``thread_id`` is the key LangSmith uses for its
+    Threads view, so the whole order shows up as one grouped conversation.
+    """
+    return {
+        "run_name": f"{run_name} [{correlation_id}]",
+        "metadata": {
+            "correlation_id": correlation_id,
+            "thread_id": correlation_id,
+        },
+        "tags": [f"correlation:{correlation_id}"],
+    }

@@ -15,11 +15,18 @@ import time
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
+from a2a.types import TaskState
 
 from order_agent.config import AGENT_NAME
-from order_agent.graph import build_order_graph, initial_state, recursion_config
+from order_agent.graph import (
+    build_audit_steps,
+    build_order_graph,
+    initial_state,
+    recursion_config,
+)
 from shared.a2a_utils import enqueue_initial_task, text_part
 from shared.audit import emit_audit
+from shared.tracing import trace_config
 
 logger = logging.getLogger("agentcart.order.executor")
 
@@ -62,13 +69,27 @@ class OrderAgentExecutor(AgentExecutor):
         status = "ok"
         try:
             graph = self._ensure_graph()
-            result = await graph.ainvoke(state, config=recursion_config())
+            config = {
+                **recursion_config(),
+                **trace_config(correlation_id, run_name="order"),
+            }
+            result = await graph.ainvoke(state, config=config)
             confirmation = result.get("confirmation") or {}
             await updater.add_artifact(
                 [text_part(json.dumps(confirmation))],
                 name=CONFIRMATION_ARTIFACT,
             )
-            await updater.complete()
+            # Complete with the three-layer audit trail attached to the task
+            # metadata so the customer-facing panel can render it. The metadata
+            # merges into task.metadata (see a2a task manager), exposing
+            # task.metadata.audit_steps to the client.
+            await updater.update_status(
+                TaskState.TASK_STATE_COMPLETED,
+                metadata={
+                    "correlation_id": correlation_id,
+                    "audit_steps": build_audit_steps(result),
+                },
+            )
         except Exception as exc:  # noqa: BLE001 - surface as task failure
             status = "error"
             logger.exception("order workflow failed")

@@ -14,10 +14,50 @@ from langchain_core.language_models import FakeListChatModel
 
 from order_agent.graph import (
     OrderGraphDeps,
+    build_audit_steps,
     build_order_graph,
     initial_state,
     recursion_config,
 )
+
+
+def test_build_audit_steps_produces_three_layer_chain():
+    """A completed-order state yields ordered, layer-tagged audit steps."""
+    state = {
+        "quantity": 3,
+        "product_name": "Blue Widget",
+        "customer_name": "Alice Johnson",
+        "total_amount": 44.97,
+        "currency": "AUD",
+        "executed_steps": [
+            "check_inventory",
+            "process_payment",
+            "arrange_shipping",
+            "save_order",
+            "send_notification",
+        ],
+        "inventory_result": "Reserved 3 units of WB-001.",
+        "payment_result": "Payment successful. Transaction ID: txn-1234.",
+        "shipping_result": "Shipment created. Tracking ID: trk-5678.",
+        "save_result": "Order ord-9999 saved.",
+        "notification_result": "Notification sent to C-001 via email.",
+    }
+
+    steps = build_audit_steps(state)
+
+    layers = [s["layer"] for s in steps]
+    # Intent (agent) first, an A2A delegation + REST result per peer step, and
+    # an MCP entry for the order-save step.
+    assert layers[0] == "agent"
+    assert "a2a" in layers and "rest" in layers and "mcp" in layers
+    # Every step carries a non-empty summary.
+    assert all(s["summary"] for s in steps)
+    # The payment REST result is surfaced verbatim for the audit panel.
+    assert any("Transaction ID: txn-1234" in s["summary"] for s in steps)
+
+
+def test_build_audit_steps_empty_when_nothing_ran():
+    assert build_audit_steps({"executed_steps": []}) == []
 
 EXTRACTION_JSON = json.dumps(
     {

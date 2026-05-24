@@ -18,6 +18,31 @@ from shared.mcp_client import load_mcp_tools
 logger = logging.getLogger("agentcart.order.runtime")
 
 
+def _tool_result_to_text(result: object) -> str:
+    """Flatten an MCP tool result to plain text.
+
+    ``langchain-mcp-adapters`` may return either a string or a list of content
+    blocks (dicts like ``{"type": "text", "text": "…"}`` or objects with a
+    ``.text`` attribute). Stringifying the list directly would leak the wrapper
+    representation, so extract and join the text instead.
+    """
+    if isinstance(result, str):
+        return result
+    if isinstance(result, list):
+        parts: list[str] = []
+        for item in result:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("text", "")))
+            else:
+                text = getattr(item, "text", None)
+                parts.append(text if isinstance(text, str) else str(item))
+        joined = " ".join(p for p in parts if p).strip()
+        return joined or str(result)
+    return str(result)
+
+
 def _make_peer_caller():
     peers = config.peer_urls()
 
@@ -67,7 +92,7 @@ def _make_order_saver():
                 "correlation_id": correlation_id,
             }
         )
-        return result if isinstance(result, str) else str(result)
+        return _tool_result_to_text(result)
 
     return save_order
 

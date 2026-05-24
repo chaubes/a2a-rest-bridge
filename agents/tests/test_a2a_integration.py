@@ -93,7 +93,7 @@ class _StubReactAgent:
     def __init__(self, reply: str):
         self._reply = reply
 
-    async def ainvoke(self, _inputs):
+    async def ainvoke(self, _inputs, config=None):
         from langchain_core.messages import AIMessage
 
         return {"messages": [AIMessage(content=self._reply)]}
@@ -124,7 +124,7 @@ async def test_peer_executor_emits_artifact_with_tool_result():
 @pytest.mark.asyncio
 async def test_peer_executor_marks_task_failed_on_error():
     class _Boom:
-        async def ainvoke(self, _inputs):
+        async def ainvoke(self, _inputs, config=None):
             raise RuntimeError("mcp down")
 
     executor = PeerAgentExecutor(
