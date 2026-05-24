@@ -4,9 +4,9 @@ import MessageBubble from './MessageBubble'
 import TypingIndicator from './TypingIndicator'
 
 const EXAMPLE_PROMPTS = [
-  "I want 3 blue widgets delivered to 12 Main St. I'm customer C-001, charge card tok-test-visa.",
-  'Order 2 red sprockets for customer C-002. My payment token is tok-test-mc.',
-  'Can you place an order for 5 gear sets? Customer ID C-003, card tok-test-amex.',
+  "I'm customer C-001. I'd like 3 Blue Widgets delivered to my default address, charge card tok-test-visa.",
+  'Order 2 Red Widgets for customer C-002. My payment token is tok-test-mc.',
+  'Can you place an order for 1 Widget Rack? Customer ID C-003, card tok-test-amex.',
 ]
 
 interface EmptyStateProps {
