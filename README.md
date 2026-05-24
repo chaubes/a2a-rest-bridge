@@ -23,6 +23,26 @@ natural language, with a side panel that surfaces the three-layer audit chain.
 > exists to show A2A and MCP working **alongside** production-grade REST services
 > — not as a replacement for them.
 
+## Why this architecture
+
+Traditional microservices push all cross-service coordination into hand-written
+glue — REST clients, DTOs, mappers, retries, circuit breakers, an API gateway.
+The services are fine; it's the coordination *between* them that becomes the tax:
+
+![Traditional microservices architecture](docs/images/01-microservices-problem.png)
+
+The hybrid approach keeps those battle-tested REST services exactly as they are
+and adds two layers on top: MCP tool servers that wrap each API with guardrails,
+and A2A agents that coordinate. The agent decides **what** to do, the MCP layer
+validates **how**, and the REST API **executes** with deterministic guarantees —
+so the language model can never bypass your validation, transactions, or audit:
+
+![Hybrid architecture: A2A + MCP + REST](docs/images/02-hybrid-architecture.png)
+
+For the customer, the payoff is that nine form fields collapse into one sentence:
+
+![Customer interface: forms versus natural language](docs/images/05-customer-interface.png)
+
 ## Architecture at a glance
 
 ```
@@ -37,6 +57,20 @@ audited state change. A single `correlation_id` threads the whole chain, so any
 order can be traced across all three layers. See [`docs/`](docs/) for the
 [architecture](docs/architecture.md), [guardrails](docs/guardrails.md), and
 [audit chain](docs/audit-chain.md) in depth.
+
+## The order workflow
+
+The Order Agent runs a [LangGraph](https://langchain-ai.github.io/langgraph/)
+state machine. Intent extraction is gated by a confidence score (low confidence
+asks a clarifying question); an inventory shortfall short-circuits straight to
+the response; and a payment failure triggers a stock-reservation rollback before
+reporting back. The compiled graph:
+
+![Order Agent LangGraph workflow](docs/images/order-agent-graph.png)
+
+Money is always computed in code from the catalog price, never from the model's
+arithmetic, and the final confirmation is validated against what the REST
+services actually returned.
 
 ## Prerequisites
 
