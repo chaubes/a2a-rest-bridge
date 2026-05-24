@@ -14,8 +14,10 @@ so older clients (and the project's frontend) can resolve either one.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Iterable
 
+import httpx
 from a2a.client import ClientConfig, create_client
 from a2a.server.agent_execution import AgentExecutor
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -196,13 +198,27 @@ def extract_response_text(task_or_message: Task | Message) -> str:
     return ""
 
 
+def _peer_timeout_seconds() -> float:
+    """Per-call timeout for peer A2A requests (configurable via env).
+
+    A peer agent runs its own LLM reasoning before replying, so the default
+    httpx timeout is far too short. Allow a generous window, overridable with
+    ``A2A_CLIENT_TIMEOUT``.
+    """
+    try:
+        return float(os.getenv("A2A_CLIENT_TIMEOUT", "120"))
+    except ValueError:
+        return 120.0
+
+
 async def call_peer_agent(peer_url: str, message_text: str) -> str:
     """Send ``message_text`` to a peer agent and return its reply as text.
 
     Uses non-streaming mode so a single Task (with artifacts) comes back, then
     extracts the result text. The client is created per call and closed after.
     """
-    config = ClientConfig(streaming=False)
+    httpx_client = httpx.AsyncClient(timeout=httpx.Timeout(_peer_timeout_seconds()))
+    config = ClientConfig(streaming=False, httpx_client=httpx_client)
     client = await create_client(peer_url, client_config=config)
     try:
         request = SendMessageRequest(message=user_message(message_text))
@@ -226,3 +242,4 @@ async def call_peer_agent(peer_url: str, message_text: str) -> str:
         return reply
     finally:
         await client.close()
+        await httpx_client.aclose()

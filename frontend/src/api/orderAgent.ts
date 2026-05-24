@@ -79,10 +79,19 @@ function tryParseOrderConfirmation(
 }
 
 /**
- * Scan a text string for a fenced ```json … ``` block and try to parse
- * an OrderConfirmation from it.
+ * Try to extract an OrderConfirmation from a text part. The Order Agent
+ * returns the confirmation as a bare JSON string, so we try parsing the whole
+ * text first, then fall back to scanning for a fenced ```json … ``` block.
  */
 function extractOrderFromTextBlock(text: string): OrderConfirmation | undefined {
+  const whole = text.trim()
+  try {
+    const oc = tryParseOrderConfirmation(JSON.parse(whole))
+    if (oc) return oc
+  } catch {
+    // not a bare JSON object — try fenced blocks below
+  }
+
   const fenceRe = /```(?:json)?\s*([\s\S]*?)```/g
   let match: RegExpExecArray | null
   while ((match = fenceRe.exec(text)) !== null) {
@@ -195,9 +204,15 @@ function parseAgentResponse(task: A2ATask): ParsedAgentResponse {
       const p = part as Record<string, unknown>
 
       if (p.kind === 'text' && typeof p.text === 'string') {
-        textParts.push(p.text)
-        if (!orderConfirmation) {
-          orderConfirmation = extractOrderFromTextBlock(p.text)
+        const oc = extractOrderFromTextBlock(p.text)
+        if (oc && !orderConfirmation) orderConfirmation = oc
+        // Don't echo a bare confirmation JSON into the chat bubble — the
+        // OrderConfirmationCard renders it. Keep any genuine prose.
+        const trimmed = p.text.trim()
+        const isBareConfirmation =
+          oc && trimmed.startsWith('{') && trimmed.endsWith('}')
+        if (!isBareConfirmation) {
+          textParts.push(p.text)
         }
       } else if (p.kind === 'data' && p.data && typeof p.data === 'object') {
         const oc = tryParseOrderConfirmation(p.data)
@@ -217,10 +232,24 @@ function parseAgentResponse(task: A2ATask): ParsedAgentResponse {
         | undefined
     )?.correlation_id as string | undefined
 
+  // When the only payload was the confirmation itself, show a short friendly
+  // line; the card carries the detail.
+  let text = textParts.join('\n\n').trim()
+  if (!text) {
+    if (orderConfirmation) {
+      text =
+        orderConfirmation.status === 'confirmed'
+          ? 'Your order is confirmed — details are below.'
+          : orderConfirmation.status === 'failed'
+            ? 'I could not complete this order. See the details below.'
+            : 'I need a little more information before placing this order.'
+    } else {
+      text = 'The agent processed your request but returned no message.'
+    }
+  }
+
   return {
-    text:
-      textParts.join('\n\n').trim() ||
-      'The agent processed your request but returned no message.',
+    text,
     orderConfirmation,
     auditSteps,
     taskId: task.id,

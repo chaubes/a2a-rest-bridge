@@ -11,11 +11,26 @@ calling agent receives actionable, human-readable guidance.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
 
-DEFAULT_TIMEOUT_SECONDS = 10.0
+
+def _default_timeout() -> float:
+    """REST call timeout in seconds, overridable via ``MCP_HTTP_TIMEOUT``.
+
+    The default is generous so that a momentarily slow or heavily loaded REST
+    service does not produce a client-side timeout while the request actually
+    succeeds server-side (which would be reported as a spurious failure).
+    """
+    try:
+        return float(os.getenv("MCP_HTTP_TIMEOUT", "60"))
+    except ValueError:
+        return 60.0
+
+
+DEFAULT_TIMEOUT_SECONDS = _default_timeout()
 
 
 def build_client(base_url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> httpx.AsyncClient:

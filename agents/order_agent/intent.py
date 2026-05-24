@@ -29,6 +29,20 @@ class ExtractedOrderIntent(BaseModel):
     address: dict = Field(default_factory=dict)
     confidence_score: float = Field(ge=0.0, le=1.0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_nulls(cls, data: object) -> object:
+        """Ignore explicit ``null`` values so field defaults apply.
+
+        Models routinely emit ``null`` for optional fields such as
+        ``shipping_method`` or ``delivery_date``; pydantic would otherwise
+        reject ``null`` for a non-optional, defaulted field. Dropping the key
+        lets the declared default take over.
+        """
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v is not None}
+        return data
+
     @model_validator(mode="after")
     def _override_total_amount(self) -> "ExtractedOrderIntent":
         """Force ``total_amount`` to the deterministic catalog computation.
