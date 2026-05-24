@@ -20,7 +20,6 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
-.python-version
 
 # ---- Java / Gradle ----
 .gradle/
