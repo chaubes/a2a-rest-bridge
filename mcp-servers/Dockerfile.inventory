@@ -1,0 +1,26 @@
+# Inventory MCP tool server image.
+FROM python:3.12-slim
+
+# Install the uv package manager.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install dependencies first for better layer caching.
+COPY pyproject.toml README.md ./
+COPY shared ./shared
+COPY inventory_mcp ./inventory_mcp
+COPY payment_mcp ./payment_mcp
+COPY shipping_mcp ./shipping_mcp
+COPY order_mcp ./order_mcp
+COPY notification_mcp ./notification_mcp
+
+RUN uv sync --no-dev
+
+EXPOSE 9001
+
+CMD ["uv", "run", "--no-dev", "python", "-m", "inventory_mcp.server"]
