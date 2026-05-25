@@ -1,31 +1,72 @@
 version: 2
+
+# Conservative policy for a demonstration repo:
+# - group each ecosystem's updates into a single PR to avoid PR floods
+# - ignore major-version bumps (those are deliberate migrations, not auto
+#   updates — major bumps like Spring Boot 4, Gradle 9, Vite 8 or Tailwind 4
+#   change behaviour and break the build)
+# Security fixes for known vulnerabilities are delivered separately by
+# Dependabot security updates and are not affected by these ignore rules.
+
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     labels: [dependencies, github-actions]
+    groups:
+      github-actions:
+        patterns: ["*"]
 
   - package-ecosystem: gradle
     directory: /rest-services
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     labels: [dependencies, java]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      gradle:
+        patterns: ["*"]
 
   - package-ecosystem: uv
     directory: /mcp-servers
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     labels: [dependencies, python]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      python:
+        patterns: ["*"]
 
   - package-ecosystem: uv
     directory: /agents
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     labels: [dependencies, python]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      python:
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     labels: [dependencies, javascript]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      frontend:
+        patterns: ["*"]
