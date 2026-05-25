@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, github-actions]
+
+  - package-ecosystem: gradle
+    directory: /rest-services
+    schedule:
+      interval: weekly
+    labels: [dependencies, java]
+
+  - package-ecosystem: uv
+    directory: /mcp-servers
+    schedule:
+      interval: weekly
+    labels: [dependencies, python]
+
+  - package-ecosystem: uv
+    directory: /agents
+    schedule:
+      interval: weekly
+    labels: [dependencies, python]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    labels: [dependencies, javascript]
