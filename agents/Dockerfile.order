@@ -1,0 +1,26 @@
+# Order A2A agent image (the orchestrator).
+FROM python:3.12-slim
+
+# Install the uv package manager.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Copy project metadata first for better layer caching.
+COPY pyproject.toml README.md ./
+COPY shared ./shared
+COPY order_agent ./order_agent
+COPY inventory_agent ./inventory_agent
+COPY payment_agent ./payment_agent
+COPY shipping_agent ./shipping_agent
+COPY notification_agent ./notification_agent
+
+RUN uv sync --no-dev
+
+EXPOSE 10010
+
+CMD ["uv", "run", "--no-dev", "python", "-m", "order_agent.server"]

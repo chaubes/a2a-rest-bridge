@@ -1,0 +1,237 @@
+# AgentCart — full hybrid REST + A2A stack.
+#
+# Layer 3 (Spring Boot REST, embedded H2) -> Layer 2 (MCP tool servers) ->
+# Layer 1 (A2A agents) -> React chat UI. Secrets (OPENAI_API_KEY, LangSmith)
+# are read from the local .env via ${VAR} interpolation and never baked into
+# images. Bring the whole stack up with: docker compose up --build
+#
+# Data lives in embedded in-memory H2 and resets on restart — by design.
+
+x-llm-env: &llm-env
+  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+  LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
+  LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+  LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+  LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-agentcart}
+  LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+  AGENT_MAX_RECURSION_LIMIT: ${AGENT_MAX_RECURSION_LIMIT:-15}
+  OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+
+# Keep each JVM lean: cap the heap and, crucially, the processor count the JVM
+# sees. Without this, every service sizes its GC/JIT/ForkJoin thread pools to
+# the host core count, and five services starting at once create a thread storm.
+x-rest-env: &rest-env
+  JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xmx320m -XX:ActiveProcessorCount=2"
+
+x-rest-healthcheck: &rest-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 18
+  start_period: 150s
+
+x-port-healthcheck: &port-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 20s
+
+services:
+  # ---------- Layer 3: Spring Boot REST APIs (embedded H2) ----------
+  order-service:
+    build: { context: ./rest-services, dockerfile: order-service/Dockerfile }
+    ports: ["8080:8080"]
+    environment:
+      <<: *rest-env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      <<: *rest-healthcheck
+
+  inventory-service:
+    build: { context: ./rest-services, dockerfile: inventory-service/Dockerfile }
+    ports: ["8081:8081"]
+    environment:
+      <<: *rest-env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      <<: *rest-healthcheck
+
+  payment-service:
+    build: { context: ./rest-services, dockerfile: payment-service/Dockerfile }
+    ports: ["8082:8082"]
+    environment:
+      <<: *rest-env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      <<: *rest-healthcheck
+
+  shipping-service:
+    build: { context: ./rest-services, dockerfile: shipping-service/Dockerfile }
+    ports: ["8083:8083"]
+    environment:
+      <<: *rest-env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      <<: *rest-healthcheck
+
+  notification-service:
+    build: { context: ./rest-services, dockerfile: notification-service/Dockerfile }
+    ports: ["8084:8084"]
+    environment:
+      <<: *rest-env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/actuator/health"]
+      <<: *rest-healthcheck
+
+  # ---------- Layer 2: MCP tool servers ----------
+  inventory-mcp:
+    build: { context: ./mcp-servers, dockerfile: Dockerfile.inventory }
+    ports: ["9001:9001"]
+    environment:
+      INVENTORY_SERVICE_URL: http://inventory-service:8081
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+    depends_on:
+      inventory-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',9001),2)"]
+      <<: *port-healthcheck
+
+  payment-mcp:
+    build: { context: ./mcp-servers, dockerfile: Dockerfile.payment }
+    ports: ["9002:9002"]
+    environment:
+      PAYMENT_SERVICE_URL: http://payment-service:8082
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+    depends_on:
+      payment-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',9002),2)"]
+      <<: *port-healthcheck
+
+  shipping-mcp:
+    build: { context: ./mcp-servers, dockerfile: Dockerfile.shipping }
+    ports: ["9003:9003"]
+    environment:
+      SHIPPING_SERVICE_URL: http://shipping-service:8083
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+    depends_on:
+      shipping-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',9003),2)"]
+      <<: *port-healthcheck
+
+  order-mcp:
+    build: { context: ./mcp-servers, dockerfile: Dockerfile.order }
+    ports: ["9004:9004"]
+    environment:
+      ORDER_SERVICE_URL: http://order-service:8080
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+    depends_on:
+      order-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',9004),2)"]
+      <<: *port-healthcheck
+
+  notification-mcp:
+    build: { context: ./mcp-servers, dockerfile: Dockerfile.notification }
+    ports: ["9005:9005"]
+    environment:
+      NOTIFICATION_SERVICE_URL: http://notification-service:8084
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+    depends_on:
+      notification-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',9005),2)"]
+      <<: *port-healthcheck
+
+  # ---------- Layer 1: A2A agents ----------
+  inventory-agent:
+    build: { context: ./agents, dockerfile: Dockerfile.inventory }
+    ports: ["10011:10011"]
+    environment:
+      <<: *llm-env
+      INVENTORY_MCP_URL: http://inventory-mcp:9001
+      INVENTORY_AGENT_URL: http://inventory-agent:10011
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      inventory-mcp: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',10011),2)"]
+      <<: *port-healthcheck
+
+  payment-agent:
+    build: { context: ./agents, dockerfile: Dockerfile.payment }
+    ports: ["10012:10012"]
+    environment:
+      <<: *llm-env
+      PAYMENT_MCP_URL: http://payment-mcp:9002
+      PAYMENT_AGENT_URL: http://payment-agent:10012
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      payment-mcp: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',10012),2)"]
+      <<: *port-healthcheck
+
+  shipping-agent:
+    build: { context: ./agents, dockerfile: Dockerfile.shipping }
+    ports: ["10013:10013"]
+    environment:
+      <<: *llm-env
+      SHIPPING_MCP_URL: http://shipping-mcp:9003
+      SHIPPING_AGENT_URL: http://shipping-agent:10013
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      shipping-mcp: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',10013),2)"]
+      <<: *port-healthcheck
+
+  notification-agent:
+    build: { context: ./agents, dockerfile: Dockerfile.notification }
+    ports: ["10014:10014"]
+    environment:
+      <<: *llm-env
+      NOTIFICATION_MCP_URL: http://notification-mcp:9005
+      NOTIFICATION_AGENT_URL: http://notification-agent:10014
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      notification-mcp: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',10014),2)"]
+      <<: *port-healthcheck
+
+  order-agent:
+    build: { context: ./agents, dockerfile: Dockerfile.order }
+    ports: ["10010:10010"]
+    environment:
+      <<: *llm-env
+      ORDER_AGENT_URL: http://order-agent:10010
+      ORDER_MCP_URL: http://order-mcp:9004
+      INVENTORY_AGENT_URL: http://inventory-agent:10011
+      PAYMENT_AGENT_URL: http://payment-agent:10012
+      SHIPPING_AGENT_URL: http://shipping-agent:10013
+      NOTIFICATION_AGENT_URL: http://notification-agent:10014
+      ORDER_AGENT_CORS_ORIGINS: ${ORDER_AGENT_CORS_ORIGINS:-*}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      order-mcp: { condition: service_healthy }
+      inventory-agent: { condition: service_healthy }
+      payment-agent: { condition: service_healthy }
+      shipping-agent: { condition: service_healthy }
+      notification-agent: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost',10010),2)"]
+      <<: *port-healthcheck
+
+  # ---------- Customer-facing chat UI ----------
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_ORDER_AGENT_URL: ${VITE_ORDER_AGENT_URL:-http://localhost:10010}
+    ports: ["3000:3000"]
+    depends_on:
+      order-agent: { condition: service_healthy }
